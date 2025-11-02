@@ -295,8 +295,4 @@ void OnBar(double high, double low, double close)
 - SafeDivide для защиты от division by zero
 - SafeLog для защиты от log(0) и log(negative)
 
----
 
-**Подготовлено:** Claude (Anthropic)  
-**Дата:** 2 ноября 2025  
-**Версия:** 1.0
