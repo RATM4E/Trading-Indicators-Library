@@ -1,5 +1,6 @@
 using System;
 using TradingLibrary.Core;
+using AvgMode = TradingLibrary.Core.MovingAveragesExtensions.AvgMode;
 
 namespace TradingLibrary.Indicators.Volatility
 {
