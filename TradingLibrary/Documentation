@@ -1,0 +1,1385 @@
+# TradingLibrary - API Documentation v1.0
+
+**Unified Cross-Platform Trading Library for cTrader (C#) and MetaTrader 5 (MQL5)**
+
+---
+
+## 📚 Table of Contents
+
+1. [Introduction](#introduction)
+2. [Installation](#installation)
+3. [Core Concepts](#core-concepts)
+4. [Module: Core/MathBase](#module-coremathbase)
+5. [Module: Core/MovingAverages](#module-coremovingaverages)
+6. [Module: Core/PriceAction](#module-corepriceaction)
+7. [Usage Examples](#usage-examples)
+8. [Best Practices](#best-practices)
+9. [Troubleshooting](#troubleshooting)
+
+---
+
+## Introduction
+
+### What is TradingLibrary?
+
+TradingLibrary is a **deterministic, cross-platform trading library** providing identical mathematical calculations on both cTrader and MT5 platforms. All indicators, moving averages, and utilities produce **bit-identical results** (±1e-12 tolerance).
+
+### Key Features
+
+✅ **Cross-platform** - C# for cTrader, MQL5 for MT5  
+✅ **Deterministic** - identical results on both platforms  
+✅ **Modular** - use only what you need  
+✅ **Stateful & Batch** - streaming and array processing  
+✅ **Production-ready** - strict NaN handling, edge cases tested  
+
+### Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | 2025-11-01 | Initial release: Core module (MathBase, MovingAverages, PriceAction) |
+
+---
+
+## Installation
+
+### cTrader (C#)
+
+1. **Download DLL:**
+   ```
+   TradingLibrary.Core.dll
+   ```
+
+2. **Copy to cAlgo folder:**
+   ```
+   C:\Users\{YourName}\Documents\cAlgo\Sources\Robots\
+   ```
+
+3. **Add reference in your cBot:**
+   - Open cBot in cTrader Automate
+   - Click **"Manage References"**
+   - **Browse** → select `TradingLibrary.Core.dll`
+   - Click **OK**
+
+4. **Use in code:**
+   ```csharp
+   using TradingLibrary.Core;
+   
+   [Robot(TimeZone = TimeZones.UTC)]
+   public class MyRobot : Robot
+   {
+       protected override void OnStart()
+       {
+           double ema = MovingAverages.EMA(prices, 14)[13];
+       }
+   }
+   ```
+
+### MetaTrader 5 (MQL5)
+
+1. **Copy .mqh files to:**
+   ```
+   C:\Users\{YourName}\AppData\Roaming\MetaQuotes\Terminal\{TerminalID}\MQL5\Include\TradingLibrary\Core\
+   ```
+
+2. **Include in your EA/Indicator:**
+   ```cpp
+   #include <TradingLibrary/Core/MathBase.mqh>
+   #include <TradingLibrary/Core/MovingAverages.mqh>
+   #include <TradingLibrary/Core/PriceAction.mqh>
+   
+   void OnStart()
+   {
+       double prices[10] = {1,2,3,4,5,6,7,8,9,10};
+       double ema[];
+       EMA(prices, 3, ema, SEED_SMA);
+   }
+   ```
+
+---
+
+## Core Concepts
+
+### Indexing Convention
+
+**All arrays use chronological indexing:**
+- **Index 0** = oldest bar
+- **Index N-1** = newest bar
+
+```
+[0]  [1]  [2]  [3]  [4]  ← array indices
+ ↑                    ↑
+oldest              newest
+```
+
+### NaN Handling Policy
+
+**Strict NaN propagation:**
+- Any `NaN` (or `EMPTY_VALUE` in MQL5) in input → `NaN` in output
+- No implicit NaN-skipping
+- Incomplete windows → `NaN` until warm-up complete
+
+```csharp
+double[] prices = { 1, 2, NaN, 4, 5 };
+double[] sma = SMA(prices, 3);
+// Result: [NaN, NaN, NaN, NaN, NaN] - entire array invalidated
+```
+
+### Warm-up Period
+
+**Warm-up** = minimum number of bars before first valid output.
+
+Example: `SMA(period=14)` requires **14 bars** warm-up.
+
+```
+Bars:  [0] [1] [2] ... [12] [13] [14] [15]
+SMA:   NaN NaN NaN ... NaN  first  ✓    ✓
+                            valid
+```
+
+### Return Types
+
+#### C# (cTrader)
+- **Batch methods** return `double[]` arrays
+- **Stateful classes** have `.Update()` method returning `double`
+- Invalid operations return `double.NaN`
+- Null inputs return `null`
+
+#### MQL5 (MT5)
+- **Batch methods** use `void` with `&result[]` out parameter
+- Invalid operations set result to `EMPTY_VALUE`
+- Check `ArraySize(result)` before use
+
+---
+
+## Module: Core/MathBase
+
+### Overview
+
+**Purpose:** Platform-independent mathematical utilities, safe operations, normalization, and statistics.
+
+**Namespace (C#):** `TradingLibrary.Core.MathBase`  
+**Include (MQL5):** `#include <TradingLibrary/Core/MathBase.mqh>`
+
+---
+
+### Constants
+
+#### C#
+```csharp
+MathBase.EPS = 1e-12;           // Epsilon for comparisons
+MathBase.NaN = double.NaN;      // NaN constant
+```
+
+#### MQL5
+```cpp
+#define EPS 1e-12
+#define NaN_VALUE EMPTY_VALUE
+```
+
+---
+
+### Price Shortcuts
+
+#### HL2 - High-Low Midpoint
+
+**Formula:** `(High + Low) / 2`
+
+**C# Signature:**
+```csharp
+double HL2(double high, double low)
+```
+
+**MQL5 Signature:**
+```cpp
+double HL2(double high, double low)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `high` | double | Bar high price |
+| `low` | double | Bar low price |
+
+**Returns:** Midpoint or `NaN` if inputs invalid
+
+**Example (C#):**
+```csharp
+double mid = MathBase.HL2(1.2000, 1.1990);
+// Result: 1.1995
+```
+
+**Example (MQL5):**
+```cpp
+double mid = HL2(1.2000, 1.1990);
+// Result: 1.1995
+```
+
+---
+
+#### HLC3 - Typical Price
+
+**Formula:** `(High + Low + Close) / 3`
+
+**C# Signature:**
+```csharp
+double HLC3(double high, double low, double close)
+```
+
+**MQL5 Signature:**
+```cpp
+double HLC3(double high, double low, double close)
+```
+
+**Returns:** Typical price or `NaN`
+
+---
+
+#### OHLC4 - Average Price
+
+**Formula:** `(Open + High + Low + Close) / 4`
+
+**C# Signature:**
+```csharp
+double OHLC4(double open, double high, double low, double close)
+```
+
+**MQL5 Signature:**
+```cpp
+double OHLC4(double open, double high, double low, double close)
+```
+
+**Returns:** Average price or `NaN`
+
+---
+
+### Safe Operations
+
+#### SafeDivide
+
+**Purpose:** Division with zero-denominator protection.
+
+**C# Signature:**
+```csharp
+double SafeDivide(double numerator, double denominator)
+```
+
+**MQL5 Signature:**
+```cpp
+double SafeDivide(double numerator, double denominator)
+```
+
+**Returns:** 
+- `numerator / denominator` if valid
+- `NaN` if denominator < EPS or inputs invalid
+
+**Example:**
+```csharp
+double result = MathBase.SafeDivide(10, 3);  // = 3.333...
+double invalid = MathBase.SafeDivide(10, 0); // = NaN
+```
+
+---
+
+#### SafeDivideOrDefault
+
+**Purpose:** Division with custom fallback value.
+
+**C# Signature:**
+```csharp
+double SafeDivideOrDefault(double numerator, double denominator, double defaultValue)
+```
+
+**Example:**
+```csharp
+double result = MathBase.SafeDivideOrDefault(10, 0, 0.0);
+// Returns 0.0 instead of NaN
+```
+
+---
+
+#### SafeSqrt, SafeLog, SafeLog10
+
+**Purpose:** Safe mathematical operations with validation.
+
+**C# Signatures:**
+```csharp
+double SafeSqrt(double x)    // Returns NaN if x < 0
+double SafeLog(double x)     // Returns NaN if x ≤ 0
+double SafeLog10(double x)   // Returns NaN if x ≤ 0
+```
+
+---
+
+### Comparison & Validation
+
+#### IsFinite
+
+**Purpose:** Check if value is valid (not NaN, not ±Infinity).
+
+**C# Signature:**
+```csharp
+bool IsFinite(double x)
+```
+
+**MQL5 Signature:**
+```cpp
+bool IsFinite(double x)
+```
+
+**Example:**
+```csharp
+bool valid = MathBase.IsFinite(1.5);        // true
+bool invalid = MathBase.IsFinite(double.NaN); // false
+```
+
+---
+
+#### AlmostEqual
+
+**Purpose:** Tolerance-based equality comparison.
+
+**C# Signature:**
+```csharp
+bool AlmostEqual(double a, double b, double epsilon = EPS)
+```
+
+**Example:**
+```csharp
+bool equal = MathBase.AlmostEqual(1.0000000001, 1.0); // true (within EPS)
+```
+
+---
+
+#### Clamp / Bound01
+
+**Purpose:** Clamp value to range.
+
+**C# Signatures:**
+```csharp
+double Clamp(double x, double lo, double hi)  // Clamp to [lo, hi]
+double Bound01(double x)                       // Clamp to [0, 1]
+```
+
+**Example:**
+```csharp
+double clamped = MathBase.Clamp(150, 0, 100); // = 100
+double bounded = MathBase.Bound01(1.5);       // = 1.0
+```
+
+---
+
+### Rounding
+
+#### Round
+
+**Purpose:** Platform-independent deterministic rounding.
+
+**C# Signature:**
+```csharp
+double Round(double value, int digits, RoundMode mode = RoundMode.HalfAwayFromZero)
+```
+
+**MQL5 Signature:**
+```cpp
+double Round(double value, int digits, ENUM_ROUND_MODE mode = ROUND_HALF_AWAY_FROM_ZERO)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `value` | double | Value to round |
+| `digits` | int | Decimal places (0-15) |
+| `mode` | enum | Rounding mode (see below) |
+
+**Rounding Modes:**
+
+| Mode | Behavior | Example: 0.5 → | Example: 1.5 → |
+|------|----------|----------------|----------------|
+| `HalfAwayFromZero` | Ties away from zero | 1 | 2 |
+| `HalfToEven` | Banker's rounding | 0 | 2 |
+| `Truncate` | Toward zero | 0 | 1 |
+| `Floor` | Toward -∞ | 0 | 1 |
+| `Ceiling` | Toward +∞ | 1 | 2 |
+
+**Example:**
+```csharp
+double r1 = MathBase.Round(1.2345, 2, MathBase.RoundMode.HalfAwayFromZero);
+// Result: 1.23
+
+double r2 = MathBase.Round(0.5, 0, MathBase.RoundMode.HalfToEven);
+// Result: 0 (banker's rounding)
+
+double r3 = MathBase.Round(1.5, 0, MathBase.RoundMode.HalfToEven);
+// Result: 2 (banker's rounding)
+```
+
+---
+
+#### RoundToTick
+
+**Purpose:** Round price to valid tick size.
+
+**C# Signature:**
+```csharp
+double RoundToTick(double price, double tickSize, RoundMode mode = RoundMode.HalfAwayFromZero)
+```
+
+**Example:**
+```csharp
+double rounded = MathBase.RoundToTick(1.23456, 0.0001);
+// Result: 1.2346 (4 decimal places)
+```
+
+---
+
+### Statistics
+
+#### Mean
+
+**Purpose:** Arithmetic mean of array segment.
+
+**C# Signatures:**
+```csharp
+double Mean(double[] values, int startIndex, int period)
+double Mean(double[] values, int period)  // Most recent period
+```
+
+**MQL5 Signatures:**
+```cpp
+double Mean(const double &values[], int startIndex, int period)
+double Mean(const double &values[], int period)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `values` | double[] | Source array |
+| `startIndex` | int | Start index (0-based) |
+| `period` | int | Window length |
+
+**Returns:** Mean or `NaN` if invalid window or contains NaN
+
+**Warm-up:** None (calculates on any valid window)
+
+**Example:**
+```csharp
+double[] prices = { 1, 2, 3, 4, 5 };
+double mean = MathBase.Mean(prices, 3);
+// Uses last 3 values: (3+4+5)/3 = 4.0
+```
+
+---
+
+#### Variance / StdDev
+
+**Purpose:** Calculate variance and standard deviation.
+
+**C# Signatures:**
+```csharp
+double Variance(double[] values, int startIndex, int period, bool sample = true)
+double StdDev(double[] values, int startIndex, int period, bool sample = true)
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sample` | bool | `true` = sample variance (n-1), `false` = population (n) |
+
+**Example:**
+```csharp
+double[] data = { 1, 2, 3, 4, 5 };
+double variance = MathBase.Variance(data, 5, sample: true);
+double stddev = MathBase.StdDev(data, 5, sample: true);
+```
+
+---
+
+#### Correlation / Covariance
+
+**Purpose:** Statistical relationships between series.
+
+**C# Signatures:**
+```csharp
+double Correlation(double[] x, double[] y, int period)
+double Covariance(double[] x, double[] y, int period, bool sample = true)
+```
+
+**Returns:** Value in [-1, 1] for correlation, or `NaN`
+
+---
+
+## Module: Core/MovingAverages
+
+### Overview
+
+**Purpose:** 14 types of moving averages with batch and stateful implementations.
+
+**Namespace (C#):** `TradingLibrary.Core.MovingAverages`  
+**Include (MQL5):** `#include <TradingLibrary/Core/MovingAverages.mqh>`
+
+---
+
+### Seed Modes (for EMA/RMA/etc)
+
+**Seed Mode** determines how exponential MAs initialize:
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| `SmaSeed` (default) | First value = SMA of first P bars | Recommended for accuracy |
+| `FirstValueSeed` | First value = src[0] | Fast warm-up |
+| `ZeroSeed` | First value = 0 | May cause initial bias |
+| `NaNSeed` | Return NaN until full period | Strict validation |
+
+**C# Enum:** `MovingAverages.SeedMode`  
+**MQL5 Enum:** `ENUM_SEED_MODE`
+
+---
+
+### SMA - Simple Moving Average
+
+**Formula:** Arithmetic mean over period
+
+**Warm-up:** `period` bars
+
+**C# Signature:**
+```csharp
+double[] SMA(double[] src, int period)
+```
+
+**MQL5 Signature:**
+```cpp
+void SMA(const double &src[], int period, double &result[])
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `src` | double[] | Source prices (chronological) |
+| `period` | int | Window length (≥1) |
+
+**Returns (C#):** Array of SMA values (NaN before warm-up)  
+**Output (MQL5):** Fills `result[]` array
+
+**Example (C#):**
+```csharp
+double[] prices = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+double[] sma = MovingAverages.SMA(prices, 3);
+
+// Result:
+// [0][1][2][3][4][5][6][7][8][9]
+// NaN NaN 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0
+//         ↑ first valid (after 3 bars)
+```
+
+**Example (MQL5):**
+```cpp
+double prices[10] = {1,2,3,4,5,6,7,8,9,10};
+double sma[];
+SMA(prices, 3, sma);
+// sma[2] = 2.0 (first valid)
+// sma[9] = 9.0
+```
+
+**Stateful Version (C#):**
+```csharp
+var smaState = new MovingAverages.SMAState(14);
+
+protected override void OnBar()
+{
+    double currentSMA = smaState.Update(Bars.ClosePrices.Last(0));
+    
+    if (smaState.IsWarmedUp)
+    {
+        // SMA is ready to use
+        Print($"SMA: {currentSMA}");
+    }
+}
+```
+
+---
+
+### EMA - Exponential Moving Average
+
+**Formula:** `EMA[t] = α × src[t] + (1-α) × EMA[t-1]`  
+**Alpha:** `α = 2 / (period + 1)`
+
+**Warm-up:** `period` bars (with SmaSeed)
+
+**C# Signatures:**
+```csharp
+double[] EMA(double[] src, int period, SeedMode seed = SeedMode.SmaSeed)
+double[] EMAFromAlpha(double[] src, double alpha, int warmupPeriod, SeedMode seed = SeedMode.SmaSeed)
+double[] EMAFromHalfLife(double[] src, double halfLife, SeedMode seed = SeedMode.SmaSeed)
+double[] EMAFromTau(double[] src, double tau, SeedMode seed = SeedMode.SmaSeed)
+```
+
+**MQL5 Signatures:**
+```cpp
+void EMA(const double &src[], int period, double &result[], ENUM_SEED_MODE seed = SEED_SMA)
+void EMAFromAlpha(const double &src[], double alpha, int warmupPeriod, double &result[], ENUM_SEED_MODE seed = SEED_SMA)
+```
+
+**Example:**
+```csharp
+double[] prices = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+double[] ema = MovingAverages.EMA(prices, 3, MovingAverages.SeedMode.SmaSeed);
+
+// Result:
+// [0][1][2]  [3]  [4]  [5]  [6]  [7]  [8]  [9]
+// NaN NaN 2.0 3.0  4.0  5.0  6.0  7.0  8.0  9.0
+//         ↑ seed from SMA(3)
+```
+
+**Stateful Version:**
+```csharp
+var emaState = new MovingAverages.EMAState(14, MovingAverages.SeedMode.SmaSeed);
+
+protected override void OnBar()
+{
+    double currentEMA = emaState.Update(Bars.ClosePrices.Last(0));
+    
+    if (emaState.IsWarmedUp)
+    {
+        Print($"EMA: {currentEMA}");
+    }
+}
+```
+
+---
+
+### RMA - Wilder's Moving Average (SMMA)
+
+**Formula:** `RMA[t] = α × src[t] + (1-α) × RMA[t-1]`  
+**Alpha:** `α = 1 / period` (slower than EMA)
+
+**Used in:** ATR, ADX, RSI (Wilder mode)
+
+**Warm-up:** `period` bars
+
+**C# Signature:**
+```csharp
+double[] RMA(double[] src, int period, SeedMode seed = SeedMode.SmaSeed)
+```
+
+**MQL5 Signature:**
+```cpp
+void RMA(const double &src[], int period, double &result[], ENUM_SEED_MODE seed = SEED_SMA)
+```
+
+---
+
+### WMA - Weighted Moving Average
+
+**Formula:** Linear weights 1, 2, 3, ..., P
+
+**Warm-up:** `period` bars
+
+**C# Signature:**
+```csharp
+double[] WMA(double[] src, int period)
+```
+
+**Example:**
+```csharp
+// For period=3, weights are [1, 2, 3]
+// WMA = (src[i-2]*1 + src[i-1]*2 + src[i]*3) / (1+2+3)
+```
+
+---
+
+### HMA - Hull Moving Average
+
+**Formula:** `WMA(2×WMA(P/2) - WMA(P), √P)`
+
+**Warm-up:** `max(period, period/2) + √period - 1`
+
+**C# Signature:**
+```csharp
+double[] HMA(double[] src, int period)
+```
+
+**Properties:**
+- Extremely responsive
+- Minimal lag
+- Good for trend detection
+
+---
+
+### DEMA - Double Exponential Moving Average
+
+**Formula:** `2×EMA(P) - EMA(EMA(P))`
+
+**Warm-up:** `2×period - 1`
+
+**C# Signature:**
+```csharp
+double[] DEMA(double[] src, int period, SeedMode seed = SeedMode.SmaSeed)
+```
+
+---
+
+### TEMA - Triple Exponential Moving Average
+
+**Formula:** `3×EMA - 3×EMA(EMA) + EMA(EMA(EMA))`
+
+**Warm-up:** `3×period - 2`
+
+**C# Signature:**
+```csharp
+double[] TEMA(double[] src, int period, SeedMode seed = SeedMode.SmaSeed)
+```
+
+---
+
+### Complete MA List
+
+| MA Type | Warm-up | Lag | Use Case |
+|---------|---------|-----|----------|
+| **SMA** | P | High | Smoothing, baselines |
+| **EMA** | P | Medium | Fast response, trending |
+| **RMA** | P | Higher | ATR, ADX, stable smoothing |
+| **WMA** | P | Low | Recent price emphasis |
+| **HMA** | Complex | Very Low | Trend following |
+| **DEMA** | 2P-1 | Low | Reduced lag |
+| **TEMA** | 3P-2 | Very Low | Minimal lag |
+| **ZLEMA** | P+lag | Minimal | Zero-lag approximation |
+| **TMA** | 2P-1 | High | Extra smoothing |
+| **SWMA** | P | Medium | Symmetric weights |
+| **LSMA** | P | Low | Linear regression |
+| **MedianMA** | P | High | Outlier resistant |
+| **KAMA** | Variable | Adaptive | Efficiency-based |
+| **T3** | 3P-2 | Very Low | Ultra-smooth |
+
+---
+
+## Module: Core/PriceAction
+
+### Overview
+
+**Purpose:** Candle geometry, True Range, Directional Movement, volatility estimators, Heikin-Ashi.
+
+**Namespace (C#):** `TradingLibrary.Core.PriceAction`  
+**Include (MQL5):** `#include <TradingLibrary/Core/PriceAction.mqh>`
+
+---
+
+### Candle Geometry
+
+#### Range
+
+**Formula:** `High - Low`
+
+**C# Signature:**
+```csharp
+double Range(double high, double low)
+```
+
+---
+
+#### RealBody
+
+**Formula:** `|Close - Open|`
+
+**C# Signature:**
+```csharp
+double RealBody(double open, double close)
+```
+
+---
+
+#### IsBull / IsBear
+
+**C# Signatures:**
+```csharp
+bool IsBull(double open, double close)  // close > open + EPS
+bool IsBear(double open, double close)  // close < open - EPS
+```
+
+**Example:**
+```csharp
+bool bullish = PriceAction.IsBull(1.1990, 1.2000);  // true
+bool bearish = PriceAction.IsBear(1.2000, 1.1990);  // true
+```
+
+---
+
+### True Range
+
+**Purpose:** Volatility measure accounting for gaps.
+
+**Formula:** `max(H-L, |H-C_prev|, |L-C_prev|)`
+
+**Warm-up:** 1 bar (needs previous close)
+
+**C# Signatures:**
+```csharp
+double[] TrueRange(double[] high, double[] low, double[] close)
+double TrueRange(double high, double low, double close, double prevClose)  // Single bar
+```
+
+**MQL5 Signatures:**
+```cpp
+void TrueRange(const double &high[], const double &low[], const double &close[], double &result[])
+double TrueRangeSingle(double high, double low, double close, double prevClose)
+```
+
+**Returns:** Array with `result[0] = NaN` (no previous close)
+
+**Example (C#):**
+```csharp
+double[] high  = { 1.2000, 1.2050, 1.2100 };
+double[] low   = { 1.1950, 1.2000, 1.2040 };
+double[] close = { 1.1980, 1.2030, 1.2080 };
+
+double[] tr = PriceAction.TrueRange(high, low, close);
+// Result: [NaN, 0.0080, 0.0060]
+//          ↑ no prev close
+```
+
+**Stateful Version:**
+```csharp
+var trState = new PriceAction.TrueRangeState();
+
+protected override void OnBar()
+{
+    double tr = trState.Update(
+        Bars.HighPrices.Last(0),
+        Bars.LowPrices.Last(0),
+        Bars.ClosePrices.Last(0)
+    );
+    
+    if (double.IsNaN(tr))
+    {
+        // First bar - no previous close
+        return;
+    }
+    
+    Print($"True Range: {tr}");
+}
+```
+
+---
+
+### Directional Movement
+
+**Purpose:** Measure directional price movement (used in DMI/ADX).
+
+**Formulas:**
+- `+DM`: up move if `High[t] - High[t-1] > Low[t-1] - Low[t]` and > 0
+- `-DM`: down move if `Low[t-1] - Low[t] > High[t] - High[t-1]` and > 0
+
+**Warm-up:** 1 bar
+
+**C# Signatures:**
+```csharp
+double[] DirectionalMovementPlus(double[] high, double[] low)
+double[] DirectionalMovementMinus(double[] high, double[] low)
+```
+
+**Returns:** Arrays with `[0] = NaN`
+
+---
+
+### Heikin-Ashi Transform
+
+**Purpose:** Smoothed candlestick representation.
+
+**Formulas:**
+```
+HA_Close = (O + H + L + C) / 4
+HA_Open = (HA_Open[prev] + HA_Close[prev]) / 2
+HA_High = max(H, HA_Open, HA_Close)
+HA_Low = min(L, HA_Open, HA_Close)
+```
+
+**Seed (first bar):**
+```
+HA_Open[0] = (O[0] + C[0]) / 2
+HA_Close[0] = (O[0] + H[0] + L[0] + C[0]) / 4
+```
+
+**C# Signature:**
+```csharp
+void HeikinAshi(double[] open, double[] high, double[] low, double[] close,
+                out double[] haOpen, out double[] haHigh, 
+                out double[] haLow, out double[] haClose)
+```
+
+**MQL5 Signature:**
+```cpp
+void HeikinAshi(const double &open[], const double &high[], 
+                const double &low[], const double &close[],
+                double &haOpen[], double &haHigh[], 
+                double &haLow[], double &haClose[])
+```
+
+**Example (C#):**
+```csharp
+double[] open  = { 1.1990, 1.2000, 1.2010 };
+double[] high  = { 1.2010, 1.2030, 1.2050 };
+double[] low   = { 1.1980, 1.1990, 1.2000 };
+double[] close = { 1.2000, 1.2020, 1.2040 };
+
+double[] haO, haH, haL, haC;
+PriceAction.HeikinAshi(open, high, low, close, 
+                       out haO, out haH, out haL, out haC);
+
+// Use haO, haH, haL, haC for smoothed candles
+```
+
+**Stateful Version:**
+```csharp
+var haState = new PriceAction.HeikinAshiState();
+
+protected override void OnBar()
+{
+    haState.Update(
+        Bars.OpenPrices.Last(0),
+        Bars.HighPrices.Last(0),
+        Bars.LowPrices.Last(0),
+        Bars.ClosePrices.Last(0)
+    );
+    
+    Print($"HA Close: {haState.HAClose}");
+}
+```
+
+---
+
+### Donchian Channel
+
+**Purpose:** Highest high and lowest low over period.
+
+**Warm-up:** `period` bars
+
+**C# Signature:**
+```csharp
+void Donchian(double[] high, double[] low, int period,
+              out double[] upper, out double[] lower, out double[] mid)
+```
+
+**MQL5 Signature:**
+```cpp
+void Donchian(const double &high[], const double &low[], int period,
+              double &upper[], double &lower[], double &mid[])
+```
+
+**Example (C#):**
+```csharp
+double[] high = { 1.20, 1.21, 1.22, 1.23, 1.24 };
+double[] low  = { 1.10, 1.11, 1.12, 1.13, 1.14 };
+
+double[] upper, lower, mid;
+PriceAction.Donchian(high, low, 3, out upper, out lower, out mid);
+
+// upper[4] = max(1.22, 1.23, 1.24) = 1.24
+// lower[4] = min(1.12, 1.13, 1.14) = 1.12
+// mid[4] = (1.24 + 1.12) / 2 = 1.18
+```
+
+---
+
+## Usage Examples
+
+### Example 1: Simple EMA Crossover Strategy (cTrader)
+
+```csharp
+using cAlgo.API;
+using TradingLibrary.Core;
+
+namespace cAlgo.Robots
+{
+    [Robot(TimeZone = TimeZones.UTC)]
+    public class EMACrossover : Robot
+    {
+        [Parameter("Fast Period", DefaultValue = 9)]
+        public int FastPeriod { get; set; }
+        
+        [Parameter("Slow Period", DefaultValue = 21)]
+        public int SlowPeriod { get; set; }
+        
+        private MovingAverages.EMAState fastEMA;
+        private MovingAverages.EMAState slowEMA;
+        
+        protected override void OnStart()
+        {
+            fastEMA = new MovingAverages.EMAState(FastPeriod);
+            slowEMA = new MovingAverages.EMAState(SlowPeriod);
+        }
+        
+        protected override void OnBar()
+        {
+            double close = Bars.ClosePrices.Last(0);
+            
+            double fast = fastEMA.Update(close);
+            double slow = slowEMA.Update(close);
+            
+            if (!fastEMA.IsWarmedUp || !slowEMA.IsWarmedUp)
+                return;
+            
+            // Crossover logic
+            if (fast > slow && Positions.Count == 0)
+            {
+                ExecuteMarketOrder(TradeType.Buy, SymbolName, 1000);
+                Print($"BUY: Fast EMA ({fast:F5}) > Slow EMA ({slow:F5})");
+            }
+            else if (fast < slow && Positions.Count > 0)
+            {
+                ClosePosition(Positions[0]);
+                Print($"SELL: Fast EMA ({fast:F5}) < Slow EMA ({slow:F5})");
+            }
+        }
+    }
+}
+```
+
+---
+
+### Example 2: True Range with ATR-based Stop Loss (cTrader)
+
+```csharp
+using cAlgo.API;
+using TradingLibrary.Core;
+
+namespace cAlgo.Robots
+{
+    [Robot(TimeZone = TimeZones.UTC)]
+    public class ATRStopLoss : Robot
+    {
+        [Parameter("ATR Period", DefaultValue = 14)]
+        public int ATRPeriod { get; set; }
+        
+        [Parameter("ATR Multiplier", DefaultValue = 2.0)]
+        public double ATRMultiplier { get; set; }
+        
+        private MovingAverages.RMAState atrState;
+        private PriceAction.TrueRangeState trState;
+        
+        protected override void OnStart()
+        {
+            atrState = new MovingAverages.RMAState(ATRPeriod);
+            trState = new PriceAction.TrueRangeState();
+        }
+        
+        protected override void OnBar()
+        {
+            // Calculate True Range
+            double tr = trState.Update(
+                Bars.HighPrices.Last(0),
+                Bars.LowPrices.Last(0),
+                Bars.ClosePrices.Last(0)
+            );
+            
+            if (double.IsNaN(tr))
+                return; // First bar
+            
+            // Calculate ATR using RMA
+            double atr = atrState.Update(tr);
+            
+            if (!atrState.IsWarmedUp)
+                return;
+            
+            // ATR-based stop loss
+            double stopDistance = atr * ATRMultiplier;
+            
+            Print($"ATR: {atr:F5}, Stop Distance: {stopDistance:F5}");
+            
+            // Use stopDistance for dynamic stop loss placement
+            if (Positions.Count == 0)
+            {
+                double entryPrice = Symbol.Bid;
+                double stopLoss = entryPrice - stopDistance;
+                
+                ExecuteMarketOrder(TradeType.Buy, SymbolName, 1000, 
+                                   "ATR Stop", stopLoss, null);
+            }
+        }
+    }
+}
+```
+
+---
+
+### Example 3: Batch Processing Historical Data (cTrader)
+
+```csharp
+using cAlgo.API;
+using TradingLibrary.Core;
+
+namespace cAlgo.Robots
+{
+    [Robot(TimeZone = TimeZones.UTC)]
+    public class BatchAnalysis : Robot
+    {
+        protected override void OnStart()
+        {
+            int barsCount = Bars.ClosePrices.Count;
+            
+            // Extract arrays
+            double[] closes = new double[barsCount];
+            for (int i = 0; i < barsCount; i++)
+                closes[i] = Bars.ClosePrices[i];
+            
+            // Calculate multiple MAs at once
+            double[] sma20 = MovingAverages.SMA(closes, 20);
+            double[] ema50 = MovingAverages.EMA(closes, 50);
+            double[] hma100 = MovingAverages.HMA(closes, 100);
+            
+            // Analyze results
+            for (int i = Math.Max(100, 0); i < barsCount; i++)
+            {
+                if (MathBase.IsFinite(sma20[i]) && 
+                    MathBase.IsFinite(ema50[i]) && 
+                    MathBase.IsFinite(hma100[i]))
+                {
+                    Print($"Bar {i}: SMA={sma20[i]:F5}, EMA={ema50[i]:F5}, HMA={hma100[i]:F5}");
+                }
+            }
+        }
+    }
+}
+```
+
+---
+
+### Example 4: Heikin-Ashi Trend Detection (cTrader)
+
+```csharp
+using cAlgo.API;
+using TradingLibrary.Core;
+
+namespace cAlgo.Robots
+{
+    [Robot(TimeZone = TimeZones.UTC)]
+    public class HeikinAshiTrend : Robot
+    {
+        private PriceAction.HeikinAshiState haState;
+        
+        protected override void OnStart()
+        {
+            haState = new PriceAction.HeikinAshiState();
+        }
+        
+        protected override void OnBar()
+        {
+            haState.Update(
+                Bars.OpenPrices.Last(0),
+                Bars.HighPrices.Last(0),
+                Bars.LowPrices.Last(0),
+                Bars.ClosePrices.Last(0)
+            );
+            
+            bool haIsBullish = PriceAction.IsBull(haState.HAOpen, haState.HAClose);
+            bool noLowerWick = MathBase.AlmostEqual(haState.HALow, 
+                                                     Math.Min(haState.HAOpen, haState.HAClose));
+            
+            if (haIsBullish && noLowerWick)
+            {
+                Print("Strong bullish HA candle - trend continuation signal");
+            }
+        }
+    }
+}
+```
+
+---
+
+## Best Practices
+
+### 1. Always Check Warm-up
+
+```csharp
+// ❌ BAD - using value before warm-up
+var ema = new MovingAverages.EMAState(14);
+double value = ema.Update(close);
+// value might be NaN!
+
+// ✅ GOOD - check warm-up
+var ema = new MovingAverages.EMAState(14);
+double value = ema.Update(close);
+if (ema.IsWarmedUp)
+{
+    // Safe to use value
+}
+```
+
+---
+
+### 2. Handle NaN Values
+
+```csharp
+// ❌ BAD - no NaN check
+double result = MathBase.SafeDivide(a, b);
+Print($"Result: {result}");
+
+// ✅ GOOD - check for NaN
+double result = MathBase.SafeDivide(a, b);
+if (MathBase.IsFinite(result))
+{
+    Print($"Result: {result}");
+}
+else
+{
+    Print("Division failed - invalid result");
+}
+```
+
+---
+
+### 3. Use Appropriate MA for Task
+
+| Task | Recommended MA | Reason |
+|------|---------------|--------|
+| Smooth trend baseline | SMA, TMA | High lag = smooth |
+| Fast trend detection | HMA, TEMA | Low lag |
+| Volume smoothing | RMA | Wilder's method |
+| Adaptive trading | KAMA | Efficiency-based |
+| Support/resistance | SMA(50), SMA(200) | Standard levels |
+
+---
+
+### 4. Batch vs Stateful
+
+**Use Batch when:**
+- Backtesting on historical data
+- Analyzing multiple indicators at once
+- One-time calculations
+
+**Use Stateful when:**
+- Live trading with streaming data
+- Memory-efficient real-time calculations
+- Maintaining state across bars
+
+```csharp
+// Batch - good for backtesting
+double[] closes = GetHistoricalCloses();
+double[] ema = MovingAverages.EMA(closes, 14);
+
+// Stateful - good for live trading
+var emaState = new MovingAverages.EMAState(14);
+protected override void OnBar()
+{
+    double ema = emaState.Update(Bars.ClosePrices.Last(0));
+}
+```
+
+---
+
+### 5. Performance Optimization
+
+```csharp
+// ❌ BAD - recalculating every tick
+protected override void OnTick()
+{
+    double[] closes = GetAllCloses();
+    double[] sma = MovingAverages.SMA(closes, 200);
+    // Extremely inefficient!
+}
+
+// ✅ GOOD - stateful update per bar
+private MovingAverages.SMAState sma;
+
+protected override void OnStart()
+{
+    sma = new MovingAverages.SMAState(200);
+}
+
+protected override void OnBar()
+{
+    sma.Update(Bars.ClosePrices.Last(0));
+    // Only one calculation per bar
+}
+```
+
+---
+
+## Troubleshooting
+
+### Issue: "Cannot find type or namespace TradingLibrary"
+
+**Solution (cTrader):**
+1. Check DLL is in correct folder
+2. Verify DLL reference is added in cBot
+3. Rebuild cBot project
+
+---
+
+### Issue: All values are NaN
+
+**Cause:** Not enough data for warm-up period
+
+**Solution:**
+```csharp
+// Check array length
+if (prices.Length < period)
+{
+    Print($"Not enough data: need {period}, have {prices.Length}");
+    return;
+}
+
+// Check warm-up in stateful
+if (!state.IsWarmedUp)
+{
+    Print($"Warming up: {state.WarmupLeft} bars left");
+    return;
+}
+```
+
+---
+
+### Issue: Results differ slightly between C# and MQL5
+
+**Expected:** Differences up to ±1e-12 are normal (floating-point precision)
+
+**Solution:** Use `AlmostEqual()` for comparisons:
+```csharp
+bool equal = MathBase.AlmostEqual(csharpResult, mql5Result, 1e-10);
+```
+
+---
+
+### Issue: Compilation error "tuple not defined"
+
+**Cause:** .NET Framework 4.6.2 needs System.ValueTuple package
+
+**Solution:** Library already uses `out` parameters instead of tuples - no action needed
+
+---
+
+## Version Notes
+
+### Current Version: 1.0
+
+**Released:** 2025-11-01
+
+**Modules Available:**
+- ✅ Core/MathBase
+- ✅ Core/MovingAverages
+- ✅ Core/PriceAction
+
+**Upcoming Modules:**
+- 🔜 Indicators/Volatility (ATR, Bollinger, Keltner)
+- 🔜 Indicators/TrendIndicators (SuperTrend, PSAR)
+- 🔜 Indicators/Momentum (RSI, Stochastic, CCI)
+- 🔜 Indicators/Oscillators (MACD, AO, AC)
+- 🔜 Indicators/Volume (OBV, MFI, VWAP)
+- 🔜 Indicators/Market (ADX, Aroon, Choppiness)
+
+---
+
+## Contact & Support
+
+**GitHub:** [Coming soon]  
+**Documentation Updates:** This file will be updated with each new module release
+
+**Reporting Issues:**
+1. Specify platform (cTrader C# or MT5 MQL5)
+2. Include code snippet demonstrating issue
+3. Provide expected vs actual results
+4. Note library version
+
+---
+
+**Last Updated:** 2025-11-01  
+**Document Version:** 1.0  
+**Library Version:** 1.0 (Core modules only)
